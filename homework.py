@@ -127,6 +127,7 @@ def main() -> None:
                     bot,
                     parse_status(homeworks[0])
                 )
+                timestamp = response.get('current_date')
         except Exception as error:
             logging.error(f'Сбой в работе программы: {error}')
             message = f'Сбой в работе программы: {error}'
