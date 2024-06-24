@@ -9,3 +9,6 @@ class NotStatusHomeworkException(Exception):
 
 class NotKeyHomeworksException(Exception):
     pass
+
+class BadResponseException(Exception):
+    pass

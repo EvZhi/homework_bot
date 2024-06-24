@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from http import HTTPStatus
+from json.decoder import JSONDecodeError
 
 import requests
 from dotenv import load_dotenv
@@ -17,6 +18,7 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
+THIRTY_DAYS_SEC = 2592000
 RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
@@ -67,12 +69,18 @@ def get_api_answer(timestamp: int) -> dict:
             params={'from_date': timestamp}
         )
     except requests.RequestException as error:
-        logging.error(f'При запросе к API возникает исключение {error}')
+        raise exceptions.BadResponseException(
+            f'При запросе к API возникает исключение {error}'
+        )
     if response.status_code != HTTPStatus.OK:
         raise exceptions.StatusNotOkException(
             'Ошибка ответа. Статус код не равен 200'
         )
-    return response.json()
+    try:
+        response = response.json()
+    except JSONDecodeError:
+        logging.error('Ошибка преобразования ответа API в json')
+    return response
 
 
 def check_response(response: dict) -> None:
@@ -81,11 +89,11 @@ def check_response(response: dict) -> None:
         raise TypeError(
             'В ответе API структура данных не словарь.'
         )
-    elif response.get('homeworks') is None:
+    if response.get('homeworks') is None:
         raise exceptions.NotKeyHomeworksException(
             ' в ответе API домашки нет ключа "homeworks"'
         )
-    elif not isinstance(response.get('homeworks'), list):
+    if not isinstance(response.get('homeworks'), list):
         raise TypeError(
             'В ответе API под ключом homeworks - не список'
         )
@@ -114,24 +122,27 @@ def main() -> None:
     )
     check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
-    timestamp = int(time.time())
+    timestamp = int(time.time()) - THIRTY_DAYS_SEC
     while True:
         try:
             response = get_api_answer(timestamp)
             check_response(response)
             homeworks = response.get('homeworks')
-            if len(homeworks) == 0:
+            error_message = None
+            if not homeworks:
                 logging.debug('Обновлений нет. Список домашних работ пуст.')
             else:
                 send_message(
                     bot,
                     parse_status(homeworks[0])
                 )
-                timestamp = response.get('current_date')
+                timestamp = response.get('current_date', timestamp)
         except Exception as error:
-            logging.error(f'Сбой в работе программы: {error}')
             message = f'Сбой в работе программы: {error}'
-            send_message(bot, message)
+            logging.error(f'Сбой в работе программы: {error}')
+            if message != error_message:
+                error_message = message
+                send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD)
 
